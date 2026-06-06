@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/bin/python -m pytest tests/test_leakage.py -v)",
+      "Bash(.venv/bin/python *)",
+      "Bash(curl -s \"https://api.github.com/repos/chadwickbureau/retrosheet/contents/gamelog\")",
+      "Bash(python3 -c \"import json,sys; items=json.load\\(sys.stdin\\); [print\\(i['name']\\) for i in items[:10]]\")",
+      "Bash(curl -s \"https://api.github.com/repos/chadwickbureau/retrosheet/contents/\")",
+      "Bash(python3 -c \"import json,sys; items=json.load\\(sys.stdin\\); [print\\(i['name']\\) for i in items]\")",
+      "Bash(curl -s \"https://api.github.com/repos/chadwickbureau/retrosheet/contents/seasons\")",
+      "Bash(python3 -c \"import json,sys; items=json.load\\(sys.stdin\\); [print\\(i['name']\\) for i in items[:5]]\")",
+      "Bash(curl -s \"https://api.github.com/repos/chadwickbureau/retrosheet/contents/seasons/2023\")",
+      "Bash(curl *)",
+      "Bash(python3 -c ' *)",
+      "Bash(python3 -m pipeline.predict --date 2025-05-14)",
+      "Bash(.venv/bin/pip install *)",
+      "Bash(kill %1)",
+      "Bash(python *)",
+      "Bash(.venv/bin/pip list *)",
+      "Bash(crontab -l)",
+      "Bash(python3 *)",
+      "Bash(.venv/bin/pytest *)"
+    ]
+  }
+}

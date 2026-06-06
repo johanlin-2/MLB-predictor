@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+data/raw/
+data/processed/
+output/
+models/_artifacts/
+.DS_Store
+*.joblib
+*.parquet
+pytest-cache-files-*/
+.pytest_cache/
