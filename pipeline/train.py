@@ -44,17 +44,57 @@ def _predict_with_calibration(model_dict, X: pd.DataFrame, name: str) -> np.ndar
         return raw
 
 
+def _generate_score_oof(df: pd.DataFrame) -> pd.DataFrame:
+    """Add leakage-free score predictions to df for use as stacking features.
+
+    For each season Y, fits score XGBoost models on all other seasons
+    (2020 excluded) and predicts on Y. The resulting `stack_pred_total` and
+    `stack_pred_spread` columns are available to the win/runline classifiers
+    without any temporal leakage.
+    """
+    df = df.copy()
+    df["stack_pred_total"] = np.nan
+    df["stack_pred_spread"] = np.nan
+
+    all_years = sorted(y for y in df["season"].unique() if y != 2020)
+    for year in all_years:
+        tr_mask = (df["season"] != year) & (df["season"] != 2020)
+        tr = df[tr_mask]
+        te = df[df["season"] == year]
+        if tr.empty or te.empty:
+            continue
+
+        X_tr, _ = safe_xy(tr, score_regressor.HOME_LABEL)
+        X_te, _ = safe_xy(te, score_regressor.HOME_LABEL)
+        common = list(X_tr.columns.intersection(X_te.columns))
+
+        home_mdl = score_regressor._fit_xgb(X_tr[common], tr[score_regressor.HOME_LABEL])
+        away_mdl = score_regressor._fit_xgb(X_tr[common], tr[score_regressor.AWAY_LABEL])
+
+        p_home = home_mdl.predict(X_te.reindex(columns=common, fill_value=0))
+        p_away = away_mdl.predict(X_te.reindex(columns=common, fill_value=0))
+
+        df.loc[df["season"] == year, "stack_pred_total"] = p_home + p_away
+        df.loc[df["season"] == year, "stack_pred_spread"] = p_home - p_away
+        logger.info("score OOF %d: %d games predicted", year, len(te))
+
+    return df
+
+
 def train_all(force_rebuild: bool = False) -> dict:
     df = build_dataset.build(force=force_rebuild)
-    logger.info("training win classifier")
-    win = win_classifier.run(df)
     logger.info("training score regressor")
     score = score_regressor.run(df)
-    logger.info("training runline classifier")
-    runline = runline_classifier.run(df)
+    logger.info("generating out-of-fold score predictions for stacking")
+    df_stacked = _generate_score_oof(df)
+    logger.info("training win classifier on stacked features")
+    win = win_classifier.run(df_stacked)
+    logger.info("training runline classifier on stacked features")
+    runline = runline_classifier.run(df_stacked)
 
-    # Per-model calibration on the validation slice
-    val = df[df["season"].isin(config.VAL_YEARS)]
+    # Per-model calibration on the validation slice (use stacked df so the
+    # calibration probes include stack_pred_* just as the final models do)
+    val = df_stacked[df_stacked["season"].isin(config.VAL_YEARS)]
     reports = []
     if not val.empty:
         X_va, _ = safe_xy(val, "home_win")
@@ -154,8 +194,21 @@ def backtest(seasons=config.TEST_YEARS) -> dict:
         logger.error("backtest produced 0 rows after odds join — abort")
         return {}
 
-    # Predict
+    # Predict — inject score-based stacking features first so the win model
+    # sees the same stack_pred_* columns it was trained with. The score model
+    # was trained on TRAIN+VAL years so predicting on TEST years is leak-free.
     from models._common import load_model
+    score_mdl = load_model("score_regressor")
+    s_feats = score_mdl["features"]
+    X_score = joined.reindex(columns=s_feats, fill_value=0).astype(np.float32)
+    X_score = X_score.fillna(X_score.median())
+    joined["stack_pred_total"] = (
+        score_mdl["home"].predict(X_score) + score_mdl["away"].predict(X_score)
+    )
+    joined["stack_pred_spread"] = (
+        score_mdl["home"].predict(X_score) - score_mdl["away"].predict(X_score)
+    )
+
     win_model = load_model("home_win_xgb")
     feats = win_model["features"]
     X = joined.reindex(columns=feats, fill_value=0).astype(np.float32) \

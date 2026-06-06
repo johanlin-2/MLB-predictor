@@ -45,13 +45,18 @@ def _build_team_game_records(game_logs: pd.DataFrame) -> pd.DataFrame:
 
 
 def _rolling(series: pd.Series, window: int = WINDOW) -> pd.Series:
-    """`.shift(1).rolling(window).mean()` — strictly leakage-safe."""
-    return series.shift(1).rolling(window, min_periods=3).mean()
+    """Leakage-safe EWMA: `.shift(1).ewm(span=window).mean()`.
+
+    Weights recent games more heavily than a flat rolling mean, giving
+    hotter recent form proportionally more influence without a hard
+    window-edge artifact.
+    """
+    return series.shift(1).ewm(span=window, min_periods=3).mean()
 
 
 def _rolling_short(series: pd.Series) -> pd.Series:
-    """7-game leakage-safe rolling mean — captures recent streaks."""
-    return series.shift(1).rolling(WINDOW_SHORT, min_periods=2).mean()
+    """7-game leakage-safe EWMA — captures hot/cold streaks."""
+    return series.shift(1).ewm(span=WINDOW_SHORT, min_periods=2).mean()
 
 
 def _add_team_rolling(long: pd.DataFrame) -> pd.DataFrame:
