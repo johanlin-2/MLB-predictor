@@ -391,9 +391,13 @@ def run(target: date) -> Path:
         pd.DataFrame().to_csv(out, index=False)
         return out
 
+    # Score must run first: its outputs become stacking features (stack_pred_*)
+    # consumed by the win and runline classifiers.
+    today = _predict_score(today)
+    today["stack_pred_total"] = today["predicted_total"]
+    today["stack_pred_spread"] = today["predicted_spread"]
     today = _predict_win(today)
     today = _predict_runline(today)
-    today = _predict_score(today)
     today = _wire_odds(today, odds_long, poly, ksh)
     sheet = _make_picks_sheet(today)
 
