@@ -61,7 +61,8 @@ KALSHI_API_SECRET: str | None = os.getenv("KALSHI_API_SECRET")
 BANKROLL_USD: float = float(os.getenv("BANKROLL_USD", "1000"))
 KELLY_FRACTION: float = float(os.getenv("KELLY_FRACTION", "0.25"))
 EDGE_THRESHOLD: float = float(os.getenv("EDGE_THRESHOLD", "0.08"))
-MIN_MODEL_PROB: float = float(os.getenv("MIN_MODEL_PROB", "0.58"))
+MIN_MODEL_PROB: float = float(os.getenv("MIN_MODEL_PROB", "0.65"))
+MIN_COVER_PROB: float = float(os.getenv("MIN_COVER_PROB", "0.55"))
 BRIER_GATE: float = float(os.getenv("BRIER_GATE", "0.25"))
 
 # ---------------------------------------------------------------------------

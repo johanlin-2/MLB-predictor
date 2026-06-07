@@ -359,16 +359,20 @@ def _make_picks_sheet(today: pd.DataFrame) -> pd.DataFrame:
     df["recommended_stake_usd"] = df["kelly_fraction"] * config.BANKROLL_USD
     df["recommended_stake_usd"] = df["recommended_stake_usd"].round(2)
 
+    runline_confirms = (
+        df.get("model_cover_prob", pd.Series(0.0, index=df.index)) >= config.MIN_COVER_PROB
+    )
     df["flag_bet"] = (
         (df["edge_vs_best"] >= config.EDGE_THRESHOLD) &
         (df["ev_at_best"] > 0) &
         (df["model_win_prob"] >= config.MIN_MODEL_PROB) &
+        runline_confirms &
         win_gate_ok
     )
 
     cols = [
         "game_id", "date", "home_team", "visiting_team",
-        "model_win_prob", "best_book", "best_price", "best_no_vig_prob",
+        "model_win_prob", "model_cover_prob", "best_book", "best_price", "best_no_vig_prob",
         "edge_vs_best", "consensus_no_vig_prob", "edge_vs_consensus", "ev_at_best",
         "predicted_home_runs", "predicted_away_runs", "predicted_total",
         "polymarket_prob", "edge_vs_polymarket",

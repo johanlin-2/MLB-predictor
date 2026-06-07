@@ -78,16 +78,28 @@ def _fetch_results(target: date) -> dict[str, dict]:
     return results
 
 
-def _predict_proba(today: pd.DataFrame) -> np.ndarray:
+def _predict_proba(today: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
+    """Returns (win_probs, cover_probs) arrays aligned to today's rows."""
     xgb = load_model("home_win_xgb")
     X = _coerce_X(today, xgb["features"])
-    p_xgb = xgb["model"].predict_proba(X)[:, 1]
+    p_win = xgb["model"].predict_proba(X)[:, 1]
     try:
-        p_xgb = calibration.apply_calibration("home_win_xgb", p_xgb)
+        p_win = calibration.apply_calibration("home_win_xgb", p_win)
     except FileNotFoundError:
         pass
 
-    return p_xgb
+    try:
+        rl = load_model("runline")
+        X_rl = _coerce_X(today, rl["features"])
+        p_cover = rl["model"].predict_proba(X_rl)[:, 1]
+        try:
+            p_cover = calibration.apply_calibration("runline", p_cover)
+        except FileNotFoundError:
+            pass
+    except FileNotFoundError:
+        p_cover = np.full(len(today), np.nan)
+
+    return p_win, p_cover
 
 
 def backtest_date(target: date) -> pd.DataFrame | None:
@@ -111,8 +123,9 @@ def backtest_date(target: date) -> pd.DataFrame | None:
     if features.empty:
         return None
 
-    p_home = _predict_proba(features)
+    p_home, p_cover = _predict_proba(features)
     prob_map = dict(zip(features["game_id"], p_home))
+    cover_map = dict(zip(features["game_id"], p_cover))
 
     # Fetch actual results
     results = _fetch_results(target)
@@ -134,8 +147,12 @@ def backtest_date(target: date) -> pd.DataFrame | None:
         edge = float(model_prob) - float(best_no_vig)
         decimal = american_to_decimal(int(best_price))
         ev = model_prob * (decimal - 1.0) - (1.0 - model_prob)
+        cover_prob = cover_map.get(gid)
+        runline_ok = (cover_prob is not None and not np.isnan(cover_prob)
+                      and float(cover_prob) >= config.MIN_COVER_PROB)
         flag = (edge >= config.EDGE_THRESHOLD and ev > 0
-                and float(model_prob) >= config.MIN_MODEL_PROB and win_gate_ok)
+                and float(model_prob) >= config.MIN_MODEL_PROB
+                and runline_ok and win_gate_ok)
 
         row = {
             "date": target.isoformat(),
@@ -143,6 +160,7 @@ def backtest_date(target: date) -> pd.DataFrame | None:
             "home_team": s["home_team"],
             "away_team": s["visiting_team"],
             "model_prob": round(float(model_prob), 4),
+            "cover_prob": round(float(cover_prob), 4) if cover_prob is not None else None,
             "best_no_vig_prob": round(float(best_no_vig), 4),
             "edge": round(edge, 4),
             "best_book": s.get("best_book"),
