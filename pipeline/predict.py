@@ -30,7 +30,7 @@ import config
 from edge import edge_calculator, kelly
 from edge.kelly import american_to_decimal
 from features import build_dataset, context_features
-from ingestion import odds_api, prediction_markets
+from ingestion import mlb_stats, odds_api, prediction_markets
 from models import calibration
 from models._common import feature_columns, load_model
 from pipeline import notify
@@ -93,6 +93,44 @@ def _fetch_mlb_schedule(target: date) -> list[dict]:
         return []
 
 
+def _apply_live_team_stats(row: dict, home: str, away: str,
+                           team_stats: dict[str, dict]) -> dict:
+    """Override stale 2023 rolling features with current-season actuals."""
+    for side, team in (("home", home), ("away", away)):
+        ts = team_stats.get(team)
+        if not ts:
+            continue
+        row[f"{side}_roll_win_pct"]          = ts["win_pct"]
+        row[f"{side}_roll7_win_pct"]         = ts["win_pct"]
+        row[f"{side}_roll_runs_scored"]      = ts["runs_per_game"]
+        row[f"{side}_roll7_runs_scored"]     = ts["runs_per_game"]
+        row[f"{side}_roll_runs_allowed"]     = ts["runs_allowed_per_game"]
+        row[f"{side}_roll7_runs_allowed"]    = ts["runs_allowed_per_game"]
+        row[f"{side}_roll_run_diff"]         = ts["run_diff_per_game"]
+        row[f"{side}_roll7_run_diff"]        = ts["run_diff_per_game"]
+    return row
+
+
+def _apply_live_pitcher_stats(row: dict, home_sp_id: str, away_sp_id: str,
+                               season: int) -> dict:
+    """Override stale SP features with current-season actuals per pitcher."""
+    for prefix, pid in (("home_sp_", home_sp_id), ("away_sp_", away_sp_id)):
+        if not pid:
+            continue
+        ps = mlb_stats.fetch_pitcher_season_stats(pid, season)
+        if not ps:
+            continue
+        row[f"{prefix}season_runs_allowed_pg"] = ps["runs_per_start"]
+        row[f"{prefix}last3_runs_allowed_pg"]  = ps["runs_per_start"]
+        row[f"{prefix}prior_ERA"]              = ps["era"]
+        row[f"{prefix}prior_WHIP"]             = ps["whip"]
+        row[f"{prefix}prior_K9"]               = ps["k9"]
+        row[f"{prefix}prior_BB9"]              = ps["bb9"]
+        row[f"{prefix}prior_FIP"]              = ps["era"]   # FIP proxy
+        row[f"{prefix}prior_xFIP"]             = ps["era"]
+    return row
+
+
 def _build_today_features(target: date) -> pd.DataFrame:
     """Build the feature matrix for the target date's slate.
 
@@ -124,6 +162,9 @@ def _build_today_features(target: date) -> pd.DataFrame:
 
     # Park factors + lat/lon lookup.
     parks = context_features.load_park_factors().set_index("team")
+
+    # Fetch current-season team stats once for the whole slate.
+    live_team_stats = mlb_stats.fetch_team_season_stats(target.year)
 
     rows = []
     seen_pks: set[int] = set()
@@ -208,6 +249,15 @@ def _build_today_features(target: date) -> pd.DataFrame:
         )
         row["season_game_num"] = 0
         row["season_progress"] = 0.5   # mid-season default for live games
+
+        # Override stale 2023 rolling features with current-season actuals.
+        row = _apply_live_team_stats(row, home, away, live_team_stats)
+        row = _apply_live_pitcher_stats(
+            row,
+            row.get("home_starting_pitcher_id", ""),
+            row.get("visitor_starting_pitcher_id", ""),
+            target.year,
+        )
 
         rows.append(row)
 
